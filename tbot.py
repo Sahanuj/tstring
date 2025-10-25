@@ -286,7 +286,7 @@ async def error_handler(update: Update, context: CallbackContext) -> None:
 def main() -> None:
     """Run the bot."""
     # Use environment variable for bot token
-    bot_token = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
+    bot_token = "8345762901:AAE50i0iDTwnIwojcfVaVHt4XYWWVenIkwg"
     application = Application.builder().token(bot_token).build()
 
     # Define conversation handler
