@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 PHONE_REQUEST, LANGUAGE_SELECTION, MAIN_MENU, CATEGORY_REDIRECTION = range(4)
 
 # MongoDB setup
-MONGO_URI = "mongodb+srv://bobytel:qwertym@telestring.8zliit3.mongodb.net/?appName=telestring"
+MONGO_URI = os.getenv("MONGO_URI", "YOUR_MONGODB_ATLAS_CONNECTION_STRING")
 try:
     client = MongoClient(MONGO_URI)
     client.admin.command('ping')
@@ -105,7 +105,8 @@ async def start(update: Update, context: CallbackContext) -> int:
         )
         keyboard = [[KeyboardButton(MENUS['en']['share_button'], request_contact=True)]]
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-        await update.message.reply_text(MENUS['en']['phone_prompt'], reply_markup=reply_markup)
+        await update.message.reply_text(MENUS['en']['phone_prompt'], reply_markup=reply_markup, protect_content=True)
+        logger.info(f"Sent phone prompt to user {user_id} with protect_content=True")
         return PHONE_REQUEST
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed in start for user {user_id}: {e}")
@@ -114,7 +115,8 @@ async def start(update: Update, context: CallbackContext) -> int:
                 await context.bot.send_message(chat_id=admin_id, text=f"Database error for user {user_id}: {str(e)}")
             except Exception as admin_error:
                 logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
-        await update.message.reply_text(MENUS['en']['db_error'])
+        await update.message.reply_text(MENUS['en']['db_error'], protect_content=True)
+        logger.info(f"Sent db_error to user {user_id} with protect_content=True")
         return ConversationHandler.END
 
 async def receive_phone(update: Update, context: CallbackContext) -> int:
@@ -138,7 +140,8 @@ async def receive_phone(update: Update, context: CallbackContext) -> int:
             )
             keyboard = [[lang] for lang in LANGUAGES.values()]
             reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-            await update.message.reply_text(MENUS['en']['select_language'], reply_markup=reply_markup)
+            await update.message.reply_text(MENUS['en']['select_language'], reply_markup=reply_markup, protect_content=True)
+            logger.info(f"Sent language selection prompt to user {user_id} with protect_content=True")
             return LANGUAGE_SELECTION
         except OperationFailure as e:
             logger.error(f"MongoDB operation failed in receive_phone for user {user_id}: {e}")
@@ -147,10 +150,12 @@ async def receive_phone(update: Update, context: CallbackContext) -> int:
                     await context.bot.send_message(chat_id=admin_id, text=f"Database error for user {user_id}: {str(e)}")
                 except Exception as admin_error:
                     logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
-            await update.message.reply_text(MENUS['en']['db_error'])
+            await update.message.reply_text(MENUS['en']['db_error'], protect_content=True)
+            logger.info(f"Sent db_error to user {user_id} with protect_content=True")
             return ConversationHandler.END
     else:
-        await update.message.reply_text(MENUS['en']['phone_denied'], reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(MENUS['en']['phone_denied'], reply_markup=ReplyKeyboardRemove(), protect_content=True)
+        logger.info(f"Sent phone_denied to user {user_id} with protect_content=True")
         return ConversationHandler.END
 
 async def select_language(update: Update, context: CallbackContext) -> int:
@@ -160,7 +165,8 @@ async def select_language(update: Update, context: CallbackContext) -> int:
     lang_code = next((code for code, name in LANGUAGES.items() if name.lower() == selected_lang.lower()), None)
     
     if lang_code not in LANGUAGES:
-        await update.message.reply_text("Invalid language. Please select a valid language.")
+        await update.message.reply_text("Invalid language. Please select a valid language.", protect_content=True)
+        logger.info(f"Sent invalid language message to user {user_id} with protect_content=True")
         return LANGUAGE_SELECTION
     
     try:
@@ -171,8 +177,8 @@ async def select_language(update: Update, context: CallbackContext) -> int:
         menu = MENUS[lang_code]
         keyboard = [[menu['category1'], menu['category2']], [menu['exit']]]
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-        await update.message.reply_text(menu['welcome'], reply_markup=reply_markup)
-        logger.info(f"User {user_id} selected language {lang_code}, menu options: {[menu['category1'], menu['category2'], menu['exit']]}")
+        await update.message.reply_text(menu['welcome'], reply_markup=reply_markup, protect_content=True)
+        logger.info(f"User {user_id} selected language {lang_code}, menu options: {[menu['category1'], menu['category2'], menu['exit']]}, sent with protect_content=True")
         return MAIN_MENU
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed in select_language for user {user_id}: {e}")
@@ -181,7 +187,8 @@ async def select_language(update: Update, context: CallbackContext) -> int:
                 await context.bot.send_message(chat_id=admin_id, text=f"Database error for user {user_id}: {str(e)}")
             except Exception as admin_error:
                 logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
-        await update.message.reply_text(MENUS[lang_code]['db_error'])
+        await update.message.reply_text(MENUS[lang_code]['db_error'], protect_content=True)
+        logger.info(f"Sent db_error to user {user_id} with protect_content=True")
         return ConversationHandler.END
 
 async def main_menu(update: Update, context: CallbackContext) -> int:
@@ -195,7 +202,8 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
     try:
         user = users_collection.find_one({'user_id': user_id})
         if not user or 'language' not in user:
-            await update.message.reply_text("Please start again with /start.")
+            await update.message.reply_text("Please start again with /start.", protect_content=True)
+            logger.info(f"Sent restart prompt to user {user_id} with protect_content=True")
             return ConversationHandler.END
         
         lang = user['language']
@@ -209,7 +217,8 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
         logger.info(f"Valid options for lang {lang}: {valid_options}")
         
         if choice_normalized == unicodedata.normalize('NFKC', menu['exit'].strip()):
-            await update.message.reply_text("Thank you for using our bot!", reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text("Thank you for using our bot!", reply_markup=ReplyKeyboardRemove(), protect_content=True)
+            logger.info(f"Sent exit message to user {user_id} with protect_content=True")
             return ConversationHandler.END
         
         if choice_normalized in [unicodedata.normalize('NFKC', menu['category1'].strip()), unicodedata.normalize('NFKC', menu['category2'].strip())]:
@@ -221,11 +230,13 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
             )
             admin_message = menu['admin_message'].format(phone=user['phone'], user_id=user_id)
             await context.bot.send_message(chat_id=admin_id, text=admin_message)
-            await update.message.reply_text(f"You selected {choice}. An admin will assist you shortly.", reply_markup=ReplyKeyboardRemove())
+            logger.info(f"Sent admin message to {admin_id}: {admin_message}")
+            await update.message.reply_text(f"You selected {choice}. An admin will assist you shortly.", reply_markup=ReplyKeyboardRemove(), protect_content=True)
+            logger.info(f"Sent category confirmation to user {user_id} with protect_content=True")
             return CATEGORY_REDIRECTION
         else:
-            await update.message.reply_text("Please select a valid option.")
-            logger.warning(f"Invalid option selected by user {user_id}: '{choice_normalized}' not in {valid_options}")
+            await update.message.reply_text("Please select a valid option.", protect_content=True)
+            logger.warning(f"Invalid option selected by user {user_id}: '{choice_normalized}' not in {valid_options}, sent with protect_content=True")
             return MAIN_MENU
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed in main_menu for user {user_id}: {e}")
@@ -234,7 +245,8 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
                 await context.bot.send_message(chat_id=admin_id, text=f"Database error for user {user_id}: {str(e)}")
             except Exception as admin_error:
                 logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
-        await update.message.reply_text(MENUS['en']['db_error'])
+        await update.message.reply_text(MENUS['en']['db_error'], protect_content=True)
+        logger.info(f"Sent db_error to user {user_id} with protect_content=True")
         return ConversationHandler.END
 
 async def forward_to_admin(update: Update, context: CallbackContext) -> None:
@@ -248,25 +260,20 @@ async def forward_to_admin(update: Update, context: CallbackContext) -> None:
             admin_id = active_chat['admin_id']
             user = users_collection.find_one({'user_id': user_id})
             if update.message.text:
-                await context.bot.send_message(
-                    chat_id=admin_id,
-                    text=f"From user: `{user['phone']}`\nMessage: {update.message.text}\nID: `{user_id}`"
-                )
+                message_text = f"From user: `{user['phone']}`\nMessage: {update.message.text}\nID: `{user_id}`\nPhone (plain): {user['phone']}\nID (plain): {user_id}"
+                await context.bot.send_message(chat_id=admin_id, text=message_text)
+                logger.info(f"Sent message to admin {admin_id}: {message_text}")
             elif update.message.photo:
-                await context.bot.send_photo(
-                    chat_id=admin_id,
-                    photo=update.message.photo[-1].file_id,
-                    caption=f"From user: `{user['phone']}`\nID: `{user_id}`"
-                )
+                message_caption = f"From user: `{user['phone']}`\nID: `{user_id}`\nPhone (plain): {user['phone']}\nID (plain): {user_id}"
+                await context.bot.send_photo(chat_id=admin_id, photo=update.message.photo[-1].file_id, caption=message_caption)
+                logger.info(f"Sent photo to admin {admin_id} with caption: {message_caption}")
             elif update.message.video:
-                await context.bot.send_video(
-                    chat_id=admin_id,
-                    video=update.message.video.file_id,
-                    caption=f"From user: `{user['phone']}`\nID: `{user_id}`"
-                )
+                message_caption = f"From user: `{user['phone']}`\nID: `{user_id}`\nPhone (plain): {user['phone']}\nID (plain): {user_id}"
+                await context.bot.send_video(chat_id=admin_id, video=update.message.video.file_id, caption=message_caption)
+                logger.info(f"Sent video to admin {admin_id} with caption: {message_caption}")
         else:
-            await update.message.reply_text("No active admin session. Please select a category from the main menu.")
-            logger.info(f"No active chat for user {user_id}, prompted to return to main menu")
+            await update.message.reply_text("No active admin session. Please select a category from the main menu.", protect_content=True)
+            logger.info(f"No active chat for user {user_id}, prompted to return to main menu with protect_content=True")
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed in forward_to_admin for user {user_id}: {e}")
         for admin_id in admin_ids:
@@ -274,7 +281,8 @@ async def forward_to_admin(update: Update, context: CallbackContext) -> None:
                 await context.bot.send_message(chat_id=admin_id, text=f"Database error for user {user_id}: {str(e)}")
             except Exception as admin_error:
                 logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
-        await update.message.reply_text(MENUS['en']['db_error'])
+        await update.message.reply_text(MENUS['en']['db_error'], protect_content=True)
+        logger.info(f"Sent db_error to user {user_id} with protect_content=True")
 
 async def admin_reply(update: Update, context: CallbackContext) -> None:
     """Handle admin replies (via /reply or direct reply to user messages)."""
@@ -317,18 +325,21 @@ async def admin_reply(update: Update, context: CallbackContext) -> None:
         
         if message.lower() == "close":
             lang = user['language']
-            await context.bot.send_message(chat_id=user['chat_id'], text=MENUS[lang]['chat_closed'])
+            await context.bot.send_message(chat_id=user['chat_id'], text=MENUS[lang]['chat_closed'], protect_content=True)
             active_chats_collection.delete_one({'user_id': user_id})
             await update.message.reply_text("Chat closed.")
-            logger.info(f"Chat closed for user {user_id} by admin {admin_id}")
+            logger.info(f"Chat closed for user {user_id} by admin {admin_id}, sent with protect_content=True")
             return
         
         if update.message.text:
-            await context.bot.send_message(chat_id=user['chat_id'], text=message)
+            await context.bot.send_message(chat_id=user['chat_id'], text=message, protect_content=True)
+            logger.info(f"Sent text message to user {user_id} with protect_content=True")
         elif update.message.photo:
-            await context.bot.send_photo(chat_id=user['chat_id'], photo=update.message.photo[-1].file_id)
+            await context.bot.send_photo(chat_id=user['chat_id'], photo=update.message.photo[-1].file_id, protect_content=True)
+            logger.info(f"Sent photo to user {user_id} with protect_content=True")
         elif update.message.video:
-            await context.bot.send_video(chat_id=user['chat_id'], video=update.message.video.file_id)
+            await context.bot.send_video(chat_id=user['chat_id'], video=update.message.video.file_id, protect_content=True)
+            logger.info(f"Sent video to user {user_id} with protect_content=True")
         await update.message.reply_text(f"Message sent to user {user_id}.")
         logger.info(f"Message sent to user {user_id} by admin {admin_id}")
     except OperationFailure as e:
@@ -339,6 +350,7 @@ async def admin_reply(update: Update, context: CallbackContext) -> None:
             except Exception as admin_error:
                 logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
         await update.message.reply_text("Invalid format or database error. Use: /reply <user_id> <message>")
+        logger.info(f"Sent error message to admin {admin_id}")
 
 async def error_handler(update: Update, context: CallbackContext) -> None:
     """Log errors caused by updates."""
