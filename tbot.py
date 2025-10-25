@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 PHONE_REQUEST, LANGUAGE_SELECTION, MAIN_MENU, CATEGORY_REDIRECTION = range(4)
 
 # MongoDB setup (use environment variable for security)
-MONGO_URI = "mongodb+srv://ubot:qwertym@telestring.8zliit3.mongodb.net/?appName=telestring"
+MONGO_URI = "mongodb+srv://bobytel:qwertym@telestring.8zliit3.mongodb.net/?appName=telestring"
 client = MongoClient(MONGO_URI)
 db = client['telegram_bot']
 users_collection = db['users']  # Store user data: user_id, phone, language, chat_id
