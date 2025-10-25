@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 PHONE_REQUEST, LANGUAGE_SELECTION, MAIN_MENU, CATEGORY_REDIRECTION = range(4)
 
 # MongoDB setup
-MONGO_URI = os.getenv("MONGO_URI", "YOUR_MONGODB_ATLAS_CONNECTION_STRING")
+MONGO_URI = "mongodb+srv://bobytel:qwertym@telestring.8zliit3.mongodb.net/?appName=telestring"
 try:
     client = MongoClient(MONGO_URI)
     client.admin.command('ping')
