@@ -10,7 +10,7 @@ from telegram.ext import (
     filters,
 )
 from pymongo import MongoClient
-from pymongo.errors import ConnectionError
+from pymongo.errors import ConnectionFailure  # Fixed import
 
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 # Define states for the conversation handler
 PHONE_REQUEST, LANGUAGE_SELECTION, MAIN_MENU, CATEGORY_REDIRECTION = range(4)
 
-# MongoDB setup (replace with your MongoDB Atlas connection string)
-MONGO_URI = os.getenv("MONGO_URI", "YOUR_MONGODB_ATLAS_CONNECTION_STRING")  # E.g., mongodb+srv://<user>:<password>@cluster0.mongodb.net
+# MongoDB setup (use environment variable for security)
+MONGO_URI = os.getenv("MONGO_URI", "YOUR_MONGODB_ATLAS_CONNECTION_STRING")
 client = MongoClient(MONGO_URI)
 db = client['telegram_bot']
 users_collection = db['users']  # Store user data: user_id, phone, language, chat_id
@@ -319,5 +319,4 @@ def main() -> None:
         client.close()  # Close MongoDB connection when bot stops
 
 if __name__ == '__main__':
-    main()
     main()
