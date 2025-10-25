@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
@@ -10,7 +11,7 @@ from telegram.ext import (
     filters,
 )
 from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure
+from pymongo.errors import ConnectionFailure, OperationFailure
 
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -21,13 +22,19 @@ PHONE_REQUEST, LANGUAGE_SELECTION, MAIN_MENU, CATEGORY_REDIRECTION = range(4)
 
 # MongoDB setup (use environment variable for security)
 MONGO_URI = "mongodb+srv://bobytel:qwertym@telestring.8zliit3.mongodb.net/?appName=telestring"
-client = MongoClient(MONGO_URI)
-db = client['telegram_bot']
-users_collection = db['users']  # Store user data: user_id, phone, language, chat_id
-active_chats_collection = db['active_chats']  # Store active user-admin pairs
+try:
+    client = MongoClient(MONGO_URI)
+    # Test the connection
+    client.admin.command('ping')
+    db = client['telegram_bot']
+    users_collection = db['users']  # Store user data: user_id, phone, language, chat_id
+    active_chats_collection = db['active_chats']  # Store active user-admin pairs
+except (ConnectionFailure, OperationFailure) as e:
+    logger.error(f"MongoDB connection failed: {e}")
+    raise Exception("Failed to connect to MongoDB. Check MONGO_URI credentials and network settings.")
 
 # Admin IDs (replace with your two actual admin Telegram chat IDs)
-admin_ids = [6581573267, 7827015238]  # EDIT HERE: Replace with your two admin IDs
+admin_ids = [6581573267, 7827015238]  # Replace with your actual admin IDs
 
 # Custom filter for multiple admin IDs
 class AdminFilter(filters.MessageFilter):
@@ -84,45 +91,72 @@ LANGUAGES = {
 async def start(update: Update, context: CallbackContext) -> int:
     """Start the bot and present a 'Share My Phone Number' button to trigger the phone number popup."""
     user_id = update.effective_user.id
+    # Reset user_data to ensure a fresh conversation
+    context.user_data.clear()
     
-    # Initialize user data in MongoDB if not exists
-    users_collection.update_one(
-        {'user_id': user_id},
-        {'$setOnInsert': {'chat_id': update.effective_chat.id}},
-        upsert=True
-    )
+    try:
+        # Initialize user data in MongoDB if not exists
+        users_collection.update_one(
+            {'user_id': user_id},
+            {'$setOnInsert': {'chat_id': update.effective_chat.id}},
+            upsert=True
+        )
 
-    # Create a keyboard with a 'Share My Phone Number' button
-    keyboard = [[KeyboardButton(MENUS['en']['share_button'], request_contact=True)]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-    
-    # Send message to inform user about phone number sharing
-    await update.message.reply_text(
-        MENUS['en']['phone_prompt'],
-        reply_markup=reply_markup
-    )
-    return PHONE_REQUEST
+        # Create a keyboard with a 'Share My Phone Number' button
+        keyboard = [[KeyboardButton(MENUS['en']['share_button'], request_contact=True)]]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        
+        # Send message to inform user about phone number sharing
+        await update.message.reply_text(
+            MENUS['en']['phone_prompt'],
+            reply_markup=reply_markup
+        )
+        return PHONE_REQUEST
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failed in start for user {user_id}: {e}")
+        for admin_id in admin_ids:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=f"Database error for user {user_id}: {str(e)}"
+                )
+            except Exception as admin_error:
+                logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
+        await update.message.reply_text(MENUS['en']['db_error'])
+        return ConversationHandler.END
 
 async def receive_phone(update: Update, context: CallbackContext) -> int:
     """Handle the phone number received from the Telegram popup."""
     user_id = update.effective_user.id
     contact = update.message.contact
     if contact and contact.phone_number:
-        # Store phone number in MongoDB
-        users_collection.update_one(
-            {'user_id': user_id},
-            {'$set': {'phone': contact.phone_number}}
-        )
-        # Show language selection menu
-        keyboard = [[lang] for lang in LANGUAGES.values()]
-        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-        await update.message.reply_text(
-            MENUS['en']['select_language'],
-            reply_markup=reply_markup
-        )
-        return LANGUAGE_SELECTION
+        try:
+            # Store phone number in MongoDB
+            users_collection.update_one(
+                {'user_id': user_id},
+                {'$set': {'phone': contact.phone_number}}
+            )
+            # Immediately show language selection menu
+            keyboard = [[lang] for lang in LANGUAGES.values()]
+            reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+            await update.message.reply_text(
+                MENUS['en']['select_language'],
+                reply_markup=reply_markup
+            )
+            return LANGUAGE_SELECTION
+        except OperationFailure as e:
+            logger.error(f"MongoDB operation failed in receive_phone for user {user_id}: {e}")
+            for admin_id in admin_ids:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=f"Database error for user {user_id}: {str(e)}"
+                    )
+                except Exception as admin_error:
+                    logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
+            await update.message.reply_text(MENUS['en']['db_error'])
+            return ConversationHandler.END
     else:
-        # If the user sends something other than a contact or denies the popup
         await update.message.reply_text(
             MENUS['en']['phone_denied'],
             reply_markup=ReplyKeyboardRemove()
@@ -133,118 +167,157 @@ async def select_language(update: Update, context: CallbackContext) -> int:
     """Handle language selection and show main menu."""
     user_id = update.effective_user.id
     selected_lang = update.message.text
-    # Map selected language to code
     lang_code = next((code for code, name in LANGUAGES.items() if name.lower() == selected_lang.lower()), None)
     
     if lang_code not in LANGUAGES:
         await update.message.reply_text("Invalid language. Please select a valid language.")
         return LANGUAGE_SELECTION
     
-    # Store language in MongoDB
-    users_collection.update_one(
-        {'user_id': user_id},
-        {'$set': {'language': lang_code}}
-    )
-    
-    # Show main menu in the selected language
-    menu = MENUS[lang_code]
-    keyboard = [
-        [menu['category1'], menu['category2']],
-        [menu['exit']]
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text(menu['welcome'], reply_markup=reply_markup)
-    return MAIN_MENU
+    try:
+        users_collection.update_one(
+            {'user_id': user_id},
+            {'$set': {'language': lang_code}}
+        )
+        
+        menu = MENUS[lang_code]
+        keyboard = [
+            [menu['category1'], menu['category2']],
+            [menu['exit']]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        await update.message.reply_text(menu['welcome'], reply_markup=reply_markup)
+        return MAIN_MENU
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failed in select_language for user {user_id}: {e}")
+        for admin_id in admin_ids:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=f"Database error for user {user_id}: {str(e)}"
+                )
+            except Exception as admin_error:
+                logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
+        await update.message.reply_text(MENUS[lang_code]['db_error'])
+        return ConversationHandler.END
 
 async def main_menu(update: Update, context: CallbackContext) -> int:
     """Handle main menu options: redirect to admin or exit."""
     user_id = update.effective_user.id
     choice = update.message.text
     
-    # Retrieve user data from MongoDB
-    user = users_collection.find_one({'user_id': user_id})
-    if not user or 'language' not in user:
-        await update.message.reply_text("Please start again with /start.")
-        return ConversationHandler.END
-    
-    lang = user['language']
-    menu = MENUS[lang]
-    
-    if choice == menu['exit']:
-        await update.message.reply_text("Thank you for using our bot!", reply_markup=ReplyKeyboardRemove())
-        return ConversationHandler.END
-    
-    if choice in [menu['category1'], menu['category2']]:
-        # Assign an admin (simple round-robin for now)
-        admin_id = admin_ids[0]  # EDIT HERE: Replace with logic to select admin if needed (e.g., load balancing)
+    try:
+        user = users_collection.find_one({'user_id': user_id})
+        if not user or 'language' not in user:
+            await update.message.reply_text("Please start again with /start.")
+            return ConversationHandler.END
         
-        # Store active chat in MongoDB
-        active_chats_collection.update_one(
-            {'user_id': user_id},
-            {'$set': {'admin_id': admin_id}},
-            upsert=True
-        )
+        lang = user['language']
+        menu = MENUS[lang]
         
-        # Send user info to admin
-        admin_message = menu['admin_message'].format(phone=user['phone'])
-        await context.bot.send_message(
-            chat_id=admin_id,
-            text=f"{admin_message}\nUser ID: {user_id}"
-        )
-        await update.message.reply_text(
-            f"You selected {choice}. An admin will assist you shortly.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return CATEGORY_REDIRECTION
-    else:
-        await update.message.reply_text("Please select a valid option.")
-        return MAIN_MENU
+        if choice == menu['exit']:
+            await update.message.reply_text("Thank you for using our bot!", reply_markup=ReplyKeyboardRemove())
+            return ConversationHandler.END
+        
+        if choice in [menu['category1'], menu['category2']]:
+            admin_id = admin_ids[user_id % len(admin_ids)]
+            active_chats_collection.update_one(
+                {'user_id': user_id},
+                {'$set': {'admin_id': admin_id}},
+                upsert=True
+            )
+            
+            admin_message = menu['admin_message'].format(phone=user['phone'])
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=f"{admin_message}\nUser ID: `{user_id}`"
+            )
+            await update.message.reply_text(
+                f"You selected {choice}. An admin will assist you shortly.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return CATEGORY_REDIRECTION
+        else:
+            await update.message.reply_text("Please select a valid option.")
+            return MAIN_MENU
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failed in main_menu for user {user_id}: {e}")
+        for admin_id in admin_ids:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=f"Database error for user {user_id}: {str(e)}"
+                )
+            except Exception as admin_error:
+                logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
+        await update.message.reply_text(MENUS['en']['db_error'])
+        return ConversationHandler.END
 
 async def forward_to_admin(update: Update, context: CallbackContext) -> None:
     """Forward user messages to the assigned admin."""
     user_id = update.effective_user.id
     
-    # Check if user has an active chat
-    active_chat = active_chats_collection.find_one({'user_id': user_id})
-    if active_chat:
-        admin_id = active_chat['admin_id']
-        user = users_collection.find_one({'user_id': user_id})
-        if update.message.text:
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=f"From user {user['phone']}: {update.message.text}"
-            )
-        elif update.message.photo:
-            await context.bot.send_photo(
-                chat_id=admin_id,
-                photo=update.message.photo[-1].file_id,
-                caption=f"From user {user['phone']}"
-            )
-        elif update.message.video:
-            await context.bot.send_video(
-                chat_id=admin_id,
-                video=update.message.video.file_id,
-                caption=f"From user {user['phone']}"
-            )
-        # Add other media types as needed
-    else:
-        await update.message.reply_text("No active admin session. Please select a category from the main menu.")
+    try:
+        active_chat = active_chats_collection.find_one({'user_id': user_id})
+        if active_chat:
+            admin_id = active_chat['admin_id']
+            user = users_collection.find_one({'user_id': user_id})
+            if update.message.text:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=f"From user `{user['phone']}`: {update.message.text}\nUser ID: `{user_id}`"
+                )
+            elif update.message.photo:
+                await context.bot.send_photo(
+                    chat_id=admin_id,
+                    photo=update.message.photo[-1].file_id,
+                    caption=f"From user `{user['phone']}`\nUser ID: `{user_id}`"
+                )
+            elif update.message.video:
+                await context.bot.send_video(
+                    chat_id=admin_id,
+                    video=update.message.video.file_id,
+                    caption=f"From user `{user['phone']}`\nUser ID: `{user_id}`"
+                )
+        else:
+            await update.message.reply_text("No active admin session. Please select a category from the main menu.")
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failed in forward_to_admin for user {user_id}: {e}")
+        for admin_id in admin_ids:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=f"Database error for user {user_id}: {str(e)}"
+                )
+            except Exception as admin_error:
+                logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
+        await update.message.reply_text(MENUS['en']['db_error'])
 
 async def admin_reply(update: Update, context: CallbackContext) -> None:
-    """Handle admin replies and forward to the user without prefix/caption."""
+    """Handle admin replies (via /reply or direct reply to user messages)."""
     admin_id = update.effective_user.id
-    if admin_id not in admin_ids:  # EDIT HERE: Changed from single admin_id check
-        return
-    
-    if not context.args:
-        await update.message.reply_text("Please provide a user ID and message. Format: /reply <user_id> <message>")
+    if admin_id not in admin_ids:
         return
     
     try:
-        user_id = int(context.args[0])
-        message = ' '.join(context.args[1:])
+        if update.message.reply_to_message:
+            replied_text = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
+            user_id_match = re.search(r"User ID: `(\d+)`", replied_text)
+            if not user_id_match:
+                await update.message.reply_text("Could not identify user. Please use /reply <user_id> <message>.")
+                return
+            user_id = int(user_id_match.group(1))
+            message = update.message.text if update.message.text else ""
+        elif context.args:
+            try:
+                user_id = int(context.args[0])
+                message = ' '.join(context.args[1:]) if len(context.args) > 1 else ""
+            except (IndexError, ValueError):
+                await update.message.reply_text("Invalid format. Use: /reply <user_id> <message>")
+                return
+        else:
+            await update.message.reply_text("Please reply to a user message or use: /reply <user_id> <message>")
+            return
         
-        # Check if user exists and has an active chat
         user = users_collection.find_one({'user_id': user_id})
         active_chat = active_chats_collection.find_one({'user_id': user_id})
         if not user or not active_chat:
@@ -252,7 +325,6 @@ async def admin_reply(update: Update, context: CallbackContext) -> None:
             return
         
         if message.lower() == "close":
-            # Close the chat
             lang = user['language']
             await context.bot.send_message(
                 chat_id=user['chat_id'],
@@ -262,7 +334,6 @@ async def admin_reply(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text("Chat closed.")
             return
         
-        # Forward admin message to user without prefix/caption
         if update.message.text:
             await context.bot.send_message(
                 chat_id=user['chat_id'],
@@ -272,17 +343,24 @@ async def admin_reply(update: Update, context: CallbackContext) -> None:
             await context.bot.send_photo(
                 chat_id=user['chat_id'],
                 photo=update.message.photo[-1].file_id
-                # No caption
             )
         elif update.message.video:
             await context.bot.send_video(
                 chat_id=user['chat_id'],
                 video=update.message.video.file_id
-                # No caption
             )
-        # Add other media types as needed
-    except (IndexError, ValueError):
-        await update.message.reply_text("Invalid format. Use: /reply <user_id> <message>")
+        await update.message.reply_text(f"Message sent to user {user_id}.")
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failed in admin_reply for user {user_id}: {e}")
+        for admin_id in admin_ids:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=f"Database error for user {user_id}: {str(e)}"
+                )
+            except Exception as admin_error:
+                logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
+        await update.message.reply_text("Invalid format or database error. Use: /reply <user_id> <message>")
 
 async def error_handler(update: Update, context: CallbackContext) -> None:
     """Log errors caused by updates."""
@@ -290,11 +368,9 @@ async def error_handler(update: Update, context: CallbackContext) -> None:
 
 def main() -> None:
     """Run the bot."""
-    # Use environment variable for bot token
     bot_token = "8345762901:AAE50i0iDTwnIwojcfVaVHt4XYWWVenIkwg"
     application = Application.builder().token(bot_token).build()
 
-    # Define conversation handler
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
@@ -307,21 +383,28 @@ def main() -> None:
                 MessageHandler(filters.VIDEO, forward_to_admin),
             ],
         },
-        fallbacks=[],
+        fallbacks=[CommandHandler('start', start)],
     )
 
-    # Add handlers
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler('reply', admin_reply))
-    application.add_handler(MessageHandler(filters.PHOTO & AdminFilter(), admin_reply))  # EDIT HERE: Use AdminFilter
-    application.add_handler(MessageHandler(filters.VIDEO & AdminFilter(), admin_reply))  # EDIT HERE: Use AdminFilter
+    application.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & AdminFilter() & filters.REPLY, admin_reply))
     application.add_error_handler(error_handler)
 
-    # Start the bot
     try:
         application.run_polling()
+    except Exception as e:
+        logger.error(f"Application failed to start: {e}")
+        for admin_id in admin_ids:
+            try:
+                application.bot.send_message(
+                    chat_id=admin_id,
+                    text=f"Bot failed to start: {str(e)}"
+                )
+            except Exception as admin_error:
+                logger.error(f"Failed to notify admin {admin_id}: {admin_error}")
     finally:
-        client.close()  # Close MongoDB connection when bot stops
+        client.close()
 
 if __name__ == '__main__':
     main()
