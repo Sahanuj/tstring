@@ -10,7 +10,7 @@ from telegram.ext import (
     filters,
 )
 from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure  # Fixed import
+from pymongo.errors import ConnectionFailure
 
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -26,8 +26,13 @@ db = client['telegram_bot']
 users_collection = db['users']  # Store user data: user_id, phone, language, chat_id
 active_chats_collection = db['active_chats']  # Store active user-admin pairs
 
-# Admin IDs (replace with actual admin Telegram chat IDs)
-admin_ids = [6581573267, 7827015238]
+# Admin IDs (replace with your two actual admin Telegram chat IDs)
+admin_ids = [6581573267, 7827015238]  # EDIT HERE: Replace with your two admin IDs
+
+# Custom filter for multiple admin IDs
+class AdminFilter(filters.MessageFilter):
+    def filter(self, update: Update) -> bool:
+        return update.effective_user.id in admin_ids
 
 # Provided menu texts for each language (replace with your actual menu texts)
 MENUS = {
@@ -171,7 +176,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
     
     if choice in [menu['category1'], menu['category2']]:
         # Assign an admin (simple round-robin for now)
-        admin_id = admin_ids[0]  # Replace with logic to select admin if needed
+        admin_id = admin_ids[0]  # EDIT HERE: Replace with logic to select admin if needed (e.g., load balancing)
         
         # Store active chat in MongoDB
         active_chats_collection.update_one(
@@ -228,7 +233,7 @@ async def forward_to_admin(update: Update, context: CallbackContext) -> None:
 async def admin_reply(update: Update, context: CallbackContext) -> None:
     """Handle admin replies and forward to the user without prefix/caption."""
     admin_id = update.effective_user.id
-    if admin_id not in admin_ids:
+    if admin_id not in admin_ids:  # EDIT HERE: Changed from single admin_id check
         return
     
     if not context.args:
@@ -308,8 +313,8 @@ def main() -> None:
     # Add handlers
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler('reply', admin_reply))
-    application.add_handler(MessageHandler(filters.PHOTO & filters.User(user_ids=admin_ids), admin_reply))
-    application.add_handler(MessageHandler(filters.VIDEO & filters.User(user_ids=admin_ids), admin_reply))
+    application.add_handler(MessageHandler(filters.PHOTO & AdminFilter(), admin_reply))  # EDIT HERE: Use AdminFilter
+    application.add_handler(MessageHandler(filters.VIDEO & AdminFilter(), admin_reply))  # EDIT HERE: Use AdminFilter
     application.add_error_handler(error_handler)
 
     # Start the bot
