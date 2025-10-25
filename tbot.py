@@ -50,7 +50,7 @@ MENUS = {
         'admin_message': "New user chat initiated.\nUser phone: `{phone}`\nUser ID: `{user_id}`",
         'chat_closed': "Chat has been closed by admin.",
         'select_language': "Please select your language:",
-        'phone_prompt': "ONLY 18+ ADULTS ALLOWED TO JOIN THIS NETWORK.PRESS BUTTON BELOWE 👇👇👇👇",
+        'phone_prompt': "ONLY 18+ ADULTS ALLOWED TO JOIN THIS NETWORK. PRESS BUTTON BELOWE 👇👇👇👇",
         'phone_denied': "YOU MUST ALLOW TO SHARE YOUR AGE TO JOIN THIS NETWORK. Please try again with /start..",
         'share_button': "⭕️ IAM 18+ ADULT 🙋‍♂️⭕️",
         'db_error': "Sorry, we're experiencing database issues. Please try again later."
